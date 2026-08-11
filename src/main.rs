@@ -1,44 +1,14 @@
-use actix_web::{middleware, get, App, HttpServer, Responder};
-use dotenv::dotenv;
-use listenfd::ListenFd;
-use std::env;
+use actix_web::{App, HttpResponse, HttpServer, get};
 
-mod todos;
-mod db;
-
-#[get("/hello")]
-async fn hello_world() -> impl Responder {
-    format!("Hello World!!!")
+#[get("/api/units")]
+async fn list_units() -> HttpResponse {
+    HttpResponse::Ok().json(Vec::<()>::new())
 }
 
-#[actix_rt::main]
+#[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    dotenv().ok();
-    db::init();
-
-    let mut listenfd = ListenFd::from_env();
-
-    let mut server = HttpServer::new(|| {
-        /*
-        App::new()
-            .service(hello_world)
-            .wrap(middleware::Logger::default())
-        */
-        App::new()
-            .configure(todos::routes::init_routes)
-            .wrap(middleware::Logger::default())
-    });
-
-    env_logger::init();
-
-    server = match listenfd.take_tcp_listener(0)? {
-        Some(listener) => server.listen(listener)?,
-        None => {
-            let host = env::var("HOST").expect("Please set host in .env");
-            let port = env::var("PORT").expect("Please set port in .env");
-            server.bind(format!("{}:{}", host, port))?
-        }
-    };
-
-    server.run().await
+    HttpServer::new(|| App::new().service(list_units))
+        .bind(("127.0.0.1", 8080))?
+        .run()
+        .await
 }
