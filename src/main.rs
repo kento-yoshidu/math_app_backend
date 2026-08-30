@@ -1,36 +1,14 @@
+mod model;
+
 use actix_web::{App, HttpResponse, HttpServer, get, web};
 use serde::Serialize;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
-use surrealdb::types::{RecordId, SurrealValue, ToSql};
-
-/// DB から取得する生のレコード形
-#[derive(Debug, SurrealValue)]
-struct UnitRow {
-    id: RecordId,
-    title: String,
-    description: Option<String>,
-}
-
-/// API レスポンス用の形
-/// id は `unit:xxx` 形式の文字列にして返す
-#[derive(Debug, Serialize)]
-struct UnitResponse {
-    id: String,
-    title: String,
-    description: Option<String>,
-}
-
-impl From<UnitRow> for UnitResponse {
-    fn from(row: UnitRow) -> Self {
-        Self {
-            id: row.id.to_sql(),
-            title: row.title,
-            description: row.description,
-        }
-    }
-}
+use model::{
+    UnitRow,
+    UnitResponse,
+};
 
 /// DB接続の死活監視用
 #[derive(Debug, Serialize)]
@@ -69,20 +47,10 @@ async fn list_units(db: web::Data<Surreal<Any>>) -> HttpResponse {
     HttpResponse::Ok().json(units)
 }
 
-/// 環境変数を読む
-/// 無ければローカル開発用のデフォルトにフォールバックする
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
-/// DB に接続し、認証・namespace/database の選択まで済ませる(接続だけが責務)。
-///
-/// 接続先は環境変数で切り替える(ローカルの `surreal start` サーバーと
-/// 本番の Surreal Cloud の両方を同じコードで扱えるようにするため)
-///
-/// - SURREAL_ENDPOINT (例: "ws://127.0.0.1:8000" / "wss://xxx.surreal.cloud")
-/// - SURREAL_NS / SURREAL_DB
-/// - SURREAL_USER / SURREAL_PASS
 async fn connect_db() -> surrealdb::Result<Surreal<Any>> {
     let endpoint = env_or("SURREAL_ENDPOINT", "ws://127.0.0.1:8000");
     let ns = env_or("SURREAL_NS", "math_app");
@@ -106,9 +74,27 @@ async fn ensure_schema(db: &Surreal<Any>) -> surrealdb::Result<()> {
     db.query(
         r#"
         DEFINE TABLE OVERWRITE unit SCHEMALESS;
+        DEFINE TABLE OVERWRITE question SCHEMALESS;
+        DEFINE TABLE OVERWRITE choice SCHEMALESS;
+        DEFINE TABLE OVERWRITE leads_to TYPE RELATION FROM choice TO question SCHEMALESS;
+
+        -- RELATE は毎回実行すると重複行が増えるので、先に張り直す
+        DELETE leads_to;
+
+        UPSERT question:q1 SET body = '原始ピタゴラス数 (a,b,c) において、a,b はどのような偶奇になるか。';
+        UPSERT choice:q1_a SET question = question:q1, label = 'A', body = '奇数 : 奇数', is_correct = false;
+        UPSERT choice:q1_b SET question = question:q1, label = 'B', body = '偶数 : 奇数 または 奇数 : 偶数', is_correct = true;
+
+        UPSERT question:q2 SET body = 'なぜ「奇数 : 奇数」はありえないのか。';
+        UPSERT choice:q2_a SET question = question:q2, label = 'A', body = '奇数²は奇数だから', is_correct = false;
+        UPSERT choice:q2_b SET question = question:q2, label = 'B', body = '奇数²+奇数²は偶数になるが4の倍数にはならないから', is_correct = true;
+
+        RELATE choice:q1_b -> leads_to -> question:q2;
+
         UPSERT unit:pythagorean_parity SET
             title = '原始ピタゴラス数の偶奇性を証明する',
-            description = 'a, b の偶奇を mod 4 の議論から導く';
+            description = 'a, b の偶奇を mod 4 の議論から導く',
+            start_question = question:q1;
         "#,
     )
     .await?
