@@ -130,14 +130,14 @@ async fn main() -> std::io::Result<()> {
 
     let db = web::Data::new(db);
 
-    let bind_addr = env_or("BIND_ADDR", "127.0.0.1");
+    // ローカルでも Render でも 0.0.0.0 以外を使う理由が無いのでハードコードする。
     let bind_port: u16 = env_or("PORT", "8080").parse().expect("PORT must be a number");
 
     HttpServer::new(move || App::new()
         .app_data(db.clone())
         .service(db_health)
         .service(list_units))
-        .bind((bind_addr, bind_port))?
+        .bind(("0.0.0.0", bind_port))?
         .run()
         .await
 }
