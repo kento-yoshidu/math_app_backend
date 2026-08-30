@@ -4,7 +4,7 @@
 
 - フロントエンド: React
 - バックエンド: Rust (actix-web)
-- DB: SurrealDB（組み込み/自己ホストで運用コストゼロ。ORMは使わず `surrealdb` クレートで SurrealQL を直接書く）
+- DB: SurrealDB（本番は Surreal Cloud の無料枠。ORMは使わず `surrealdb` クレートで SurrealQL を直接書く）
 
 この文書は暫定版であり、実装を進めながら随時更新する。
 
@@ -245,7 +245,12 @@ Content-Type: application/json
 
 ## 6. DB運用・デプロイ方針
 
-- **開発〜個人運用は SurrealDB の埋め込みモードを使う**（`surrealdb` クレート + `kv-rocksdb` feature）。別プロセスの DB サーバーを立てず、actix-web のバイナリにDBエンジンごと組み込み、ローカルファイル(RocksDB)にデータを保存する
-- 本番デプロイも同じバイナリをそのまま VPS / 無料枠 PaaS（Oracle Cloud Free Tier、Fly.io、Railway 等）に1つ置くだけで完結させる。永続ボリュームが必要（コンテナの ephemeral storage だと再起動でデータが消える点に注意）
-- ユーザー増加や複数インスタンス運用が必要になった時点で `surreal start` による別プロセス化（同一VPS内で systemd サービス化する程度）を検討する。それまでは埋め込みモードで十分
+DBとアプリのデプロイ先は分離する。
+
+- **DB: Surreal Cloud の無料枠**（1GBストレージまで永久無料）を使う。マネージドなので自前でVMや永続ディスクを用意する必要がなく、Surrealist(公式GUI)からもそのまま接続できる
+  - 開発中のローカル動作確認・学習用には `examples/db_demo.rs` のような **embedded モード**（`kv-surrealkv` feature、ローカルファイルに永続化）も引き続き使う。こちらはサーバー不要で手軽な反面、外部GUIからは接続できない(単一プロセスの中に閉じたDB)ため、GUIで覗きたい時だけ別途 `surreal start` でローカルサーバー化する
+  - 本番は embedded ではなく、actix-web から Surreal Cloud のエンドポイントへ `Ws`(remote client)で接続する。接続情報(エンドポイントURL・namespace・db・認証情報)は環境変数で渡し、コードにハードコードしない
+- **アプリ(actix-web): Render の無料プラン**。Rustのネイティブ環境として動かせる。DB側の状態はSurreal Cloudに逃がしてあるので、Renderの無料プランがエフェメラルディスクでも問題ない(actix側はステートレス)
+  - 無料プランは15分アクセスが無いとスピンダウンし、次のリクエストで約1分のコールドスタートが発生する点は許容する。気になるようになったら有料プランへの引き上げを検討する
+- 比較検討したが不採用にした選択肢: Fly.io(2024年に無料枠廃止、月額$8〜25程度)、Oracle Cloud Free Tier(2026年6月に容量半減・確保しづらい)、自前VPS(Hetzner/Contabo、月500〜800円で悪くはないが管理の手間が増える)
 - SurrealDB は API・スキーマともに変更が比較的活発なので、`Cargo.toml` でバージョンを固定し、アップデート時は変更点を確認してから上げる
